@@ -98,6 +98,8 @@ def main():
     app.add_handler(CallbackQueryHandler(button))
 
     print("Бот с очками и топом запущен...")
+    print("TOKEN:", os.getenv("BOT_TOKEN"))
+
     app.run_polling()
 
 if __name__ == "__main__":
