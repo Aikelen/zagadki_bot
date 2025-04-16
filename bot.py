@@ -1,35 +1,51 @@
-﻿import json
+import json
 import os
 import random
+import asyncpg
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 
-# ---------- ФАЙЛЫ ----------
+# ---------- ФАЙЛ ЗАГАДОК ----------
 RIDDLES_FILE = "riddles.json"
-SCORES_FILE = "scores.json"
+with open(RIDDLES_FILE, "r", encoding="utf-8") as f:
+    riddles = json.load(f)
 
-# ---------- ЗАГАДКИ ----------
-def load_riddles():
-    with open(RIDDLES_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-riddles = load_riddles()
 current_riddle = {}  # user_id: (question, correct_answer)
+DB_URL = os.getenv("DATABASE_URL")
 
-# ---------- СЧЁТ ----------
-def save_scores():
-    with open(SCORES_FILE, "w", encoding="utf-8") as f:
-        json.dump(user_scores, f, ensure_ascii=False, indent=2)
+# ---------- ФУНКЦИИ ДЛЯ РАБОТЫ С БАЗОЙ ----------
 
-def load_scores():
-    if os.path.exists(SCORES_FILE):
-        with open(SCORES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+async def get_score(user_id):
+    conn = await asyncpg.connect(DB_URL)
+    row = await conn.fetchrow("SELECT score FROM scores WHERE user_id = $1", user_id)
+    await conn.close()
+    return row["score"] if row else 0
 
-user_scores = load_scores()
+async def update_score(user_id, username, correct=True):
+    score = await get_score(user_id)
+    new_score = score + 1 if correct else score
+
+    conn = await asyncpg.connect(DB_URL)
+    await conn.execute("""
+        INSERT INTO scores (user_id, username, score)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id) DO UPDATE
+        SET username = $2, score = $3
+    """, user_id, username, new_score)
+    await conn.close()
+
+async def get_top_scores(limit=3):
+    conn = await asyncpg.connect(DB_URL)
+    rows = await conn.fetch("""
+        SELECT username, score FROM scores
+        ORDER BY score DESC
+        LIMIT $1
+    """, limit)
+    await conn.close()
+    return rows
 
 # ---------- КОМАНДЫ ----------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Нажми /riddle — я загадаю загадку с вариантами 😉")
 
@@ -56,13 +72,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, correct = current_riddle[user_id]
         name = query.from_user.username or query.from_user.first_name
 
-        if str(user_id) not in user_scores:
-            user_scores[str(user_id)] = {"score": 0, "name": name}
-
         if selected == correct.lower():
-            user_scores[str(user_id)]["score"] += 1
-            save_scores()
-            await query.edit_message_text(f"🎉 Верно! Твой счёт: {user_scores[str(user_id)]['score']}\nНапиши /riddle для следующей.")
+            await update_score(user_id, name, correct=True)
+            score = await get_score(user_id)
+            await query.edit_message_text(f"🎉 Верно! Твой счёт: {score}\nНапиши /riddle для следующей.")
         else:
             await query.edit_message_text("❌ Неверно. Попробуй снова /riddle.")
         del current_riddle[user_id]
@@ -70,26 +83,30 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Загадка не найдена. Напиши /riddle.")
 
 async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    score = user_scores.get(user_id, {}).get("score", 0)
+    user_id = update.effective_user.id
+    score = await get_score(user_id)
     await update.message.reply_text(f"🏆 Твой счёт: {score}")
 
 async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not user_scores:
+    top_users = await get_top_scores()
+    if not top_users:
         await update.message.reply_text("Тут пока никого нет. Будь первым! 🥇")
         return
 
-    top_users = sorted(user_scores.items(), key=lambda x: x[1]["score"], reverse=True)[:3]
-
     msg = "🏆 Топ игроков:\n"
-    for i, (uid, data) in enumerate(top_users, start=1):
-        msg += f"{i}. {data['name']} — {data['score']} очков\n"
+    for i, row in enumerate(top_users, start=1):
+        msg += f"{i}. {row['username']} — {row['score']} очков\n"
 
     await update.message.reply_text(msg)
 
 # ---------- ЗАПУСК ----------
+
 def main():
-    app = ApplicationBuilder().token("7531045833:AAEmypepxesaAwfwsKwbQjFqmQ7-SQPdiBU").build()
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("❌ Переменная BOT_TOKEN не найдена!")
+
+    app = ApplicationBuilder().token(token).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("riddle", riddle))
@@ -97,9 +114,7 @@ def main():
     app.add_handler(CommandHandler("top", top))
     app.add_handler(CallbackQueryHandler(button))
 
-    print("Бот с очками и топом запущен...")
-    print("TOKEN:", os.getenv("BOT_TOKEN"))
-
+    print("Бот с базой данных запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
