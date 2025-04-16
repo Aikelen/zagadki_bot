@@ -89,7 +89,7 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- ЗАПУСК ----------
 def main():
-    app = ApplicationBuilder().token("7531045833:AAEAu4YV2-c8Ut0T6wiAE66zlEEEs1_7AJE").build()
+    app = ApplicationBuilder().token("7531045833:AAEmypepxesaAwfwsKwbQjFqmQ7-SQPdiBU").build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("riddle", riddle))
