@@ -1,1 +1,1 @@
-worker: python bot.py
+worker: python init_db.py
