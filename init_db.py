@@ -11,6 +11,7 @@ async def create_table():
             score INTEGER
         );
     """)
+    print("✅ Таблица создана!")
     await conn.close()
 
 asyncio.run(create_table())
