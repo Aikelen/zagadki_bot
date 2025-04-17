@@ -68,20 +68,27 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     selected = query.data.lower()
 
-    if user_id in current_riddle:
-        _, correct = current_riddle[user_id]
-        name = query.from_user.username or query.from_user.first_name
+    if user_id not in current_riddle:
+        await query.edit_message_text("Загадка не найдена. Напиши /riddle.")
+        return
 
+    question, correct = current_riddle[user_id]
+    name = query.from_user.username or query.from_user.first_name
+
+    try:
         if selected == correct.lower():
             await update_score(user_id, name, correct=True)
             score = await get_score(user_id)
-            await query.edit_message_text(f"🎉 Верно! Твой счёт: {score}\nНапиши /riddle для следующей.")
+            await query.edit_message_text(
+                f"🎉 Верно! Твой счёт: {score}\nНапиши /riddle для следующей."
+            )
         else:
             await query.edit_message_text("❌ Неверно. Попробуй снова /riddle.")
-        del current_riddle[user_id]
-    else:
-        await query.edit_message_text("Загадка не найдена. Напиши /riddle.")
+    except Exception as e:
+        await query.edit_message_text(f"⚠️ Ошибка: {e}")
 
+    # Удаляем загадку независимо от ответа
+    del current_riddle[user_id]
 async def score(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     score = await get_score(user_id)
